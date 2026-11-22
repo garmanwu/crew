@@ -25,7 +25,7 @@ python3 $CREW <子命令> ...
 
 ## spawn：新开一个 agent
 
-1. `python3 $CREW models` 得到 6 个选项（codex、agy、claude 各前两个模型，带可用 effort）。
+1. `python3 $CREW models` 得到 6 个选项（codex、agy、claude 各前两个模型，带可用 effort；agy 跳过 `crew.py` 里 `AGY_MENU_SKIP` 列出的系列，目前是 argon，所以给出 neon 和 hydrogen）。
 2. 用户在参数里已经给全（名称、agent、模型、effort）就直接到第 3 步。否则把 6 个选项列成编号清单，一次问清三件事：选哪个编号、agent 叫什么名字（如 `design`）、effort（默认 `high`）。让用户用一行回复，例如 `2 design high`。不要用 AskUserQuestion 做六选一（它最多 4 个选项）。
 3. 启动：
 

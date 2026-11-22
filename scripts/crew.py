@@ -20,6 +20,8 @@ STATE = ".crew.json"
 ITERM = "/Applications/iTerm.app"
 EFFORT_SUFFIX = re.compile(r"-(low|medium|high|xhigh|max)$")
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+# agy families hidden from the `models` menu (still spawnable by explicit --model).
+AGY_MENU_SKIP = {"gemini-4-argon"}
 CLAUDE_MODELS = [("fable", "Claude Fable（最新）"), ("opus", "Claude Opus（最新）")]
 CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 
@@ -360,7 +362,8 @@ def cmd_models(args):
     for x in codex_catalog()[:2]:
         rows.append({"agent": "codex", "model": x["slug"], "label": x["display_name"],
                      "efforts": [e["effort"] for e in x.get("supported_reasoning_levels", [])]})
-    for fam, info in list(agy_catalog().items())[:2]:
+    agy = [(f, i) for f, i in agy_catalog().items() if f not in AGY_MENU_SKIP]
+    for fam, info in agy[:2]:
         rows.append({"agent": "agy", "model": fam, "label": info["label"],
                      "efforts": info["efforts"]})
     for mid, label in CLAUDE_MODELS:
@@ -614,7 +617,7 @@ def main():
     p = argparse.ArgumentParser(prog="crew")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("models", help="top 2 models of codex / agy / claude")
+    s = sub.add_parser("models", help="top 2 models of codex / agy / claude (agy skips AGY_MENU_SKIP)")
     s.set_defaults(fn=cmd_models)
 
     s = sub.add_parser("spawn", help="open a new agent in a split pane")
