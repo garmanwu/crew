@@ -1,6 +1,6 @@
 # crew
 
-一个 [Claude Code](https://claude.com/claude-code) skill：在 iTerm2 里给当前会话分屏，几秒钟拉起一个新的 agent（Codex、Antigravity `agy`、Claude Code），指定模型和思考强度；agent 之间通过 tmux 互发消息；整组可以保存到项目目录，之后一键恢复窗口、模型、effort 和每个 agent 的历史对话。
+一个可以在 Claude Code、Codex、Antigravity（`agy`）里使用的 skill：在 iTerm2 里给当前会话分屏，几秒钟拉起一个新的 agent（Codex、Antigravity `agy`、Claude Code），指定模型和思考强度；agent 之间通过 tmux 互发消息；整组可以保存到项目目录，之后一键恢复窗口、模型、effort 和每个 agent 的历史对话。
 
 ![主会话在左，neon 和 astra 两个 agent 在右侧分屏，互相发消息；下方是保存与一键恢复](docs/crew.svg)
 
@@ -12,6 +12,8 @@
 
 **跨模型协作。** 不同厂商的模型放进同一个组，主会话可以分派任务、读取各自的进展，组员之间也能直接对话（比如让一个写、一个审）。
 
+**匿名评议。** 重要决策让几个模型各写立场、匿名互评、再自行修正，最后得到一张分歧地图：共识、分歧的症结、被保留的少数派观点。不投票，不求一致。
+
 **长期项目。** 讨论到一半要关机，保存一下；下次双击一个文件，整组 agent 带着各自的上下文回到原来的分屏位置。
 
 ## 安装
@@ -20,16 +22,24 @@
 git clone https://github.com/garmanwu/crew ~/.claude/skills/crew
 ```
 
-需要 macOS、iTerm2、`tmux`、`python3`，以及要用到的 agent CLI（`codex`、`agy`、`claude`，已登录）。重启 Claude Code 后即可使用 `/crew`。
+要在 Codex 和 agy 里也能调用，把同一份目录链接过去：
+
+```bash
+ln -s ~/.claude/skills/crew ~/.codex/skills/crew
+mkdir -p ~/.gemini/config/skills && ln -s ~/.claude/skills/crew ~/.gemini/config/skills/crew
+```
+
+需要 macOS、iTerm2、`tmux`、`python3`，以及要用到的 agent CLI（`codex`、`agy`、`claude`，已登录）。重启对应的 CLI 后即可使用：Claude Code 里是 `/crew`，Codex 里是 `$crew`，agy 里直接用自然语言。
 
 ## 用法
 
-在项目目录里的 Claude Code 会话（称为 main）中：
+在项目目录里的 Claude Code、Codex 或 agy 会话（第一个建组的会话称为 main）中：
 
 ```
 /crew                      # 列出 6 个模型（codex、agy、claude 各前 2 个），回一行选择，如：2 design high
 /crew astra high           # 直接指定：模型 astra，effort high
 /crew 保存工作组            # 保存成员、模型、effort、会话 ID、分屏位置
+/crew panel 要不要做 X？    # 组员三轮匿名评议，main 汇总成分歧地图
 ```
 
 也可以直接用自然语言：
@@ -67,6 +77,25 @@ python3 $CREW save
 python3 $CREW restore --dir <项目目录>
 ```
 
+### 匿名评议（panel）
+
+组里有 3 个以上成员（最好来自不同厂商）时，可以让它们评议一个议题：
+
+```
+/crew panel 版型数据库要不要从 DXF 迁到自定义 JSON？背景见 SPEC.md
+```
+
+| 轮次 | 每个成员做什么 |
+|---|---|
+| 1 独立立场 | 互不可见，各写一份立场 |
+| 2 互评 | 立场以 A、B、C… 匿名公开；对每份写最强反对意见和值得借鉴的点 |
+| 3 修正 | 评议匿名公开；写最终立场，开头说明因哪条论据改了什么、哪些仍坚持 |
+| 汇总 | main 只读匿名文件，写 `map.md`：共识、分歧与症结、少数派立场、立场变化、核心问题；之后揭晓代号 |
+
+所有文件在 `<项目>/.crew/panel/<评议 ID>/`。没有投票，改不改主意由每个成员自己决定。盲写和匿名靠指令约束，不是强制隔离。
+
+脚本命令：`panel start --topic "..."`、`panel wait`、`panel next`、`panel status`、`panel reveal`。
+
 ## 需要知道的
 
 - **Codex 默认以 full access 启动**（`-s danger-full-access -a never`）：执行命令不受沙箱限制，也不请求审批，范围是整台机器。原因是 Codex 的沙箱会拦住 tmux，关掉才能主动给组员发消息。想保留沙箱就在新开时说"保留沙箱"（`--sandbox`），这时它只能被读取，不能主动发消息。
@@ -74,7 +103,8 @@ python3 $CREW restore --dir <项目目录>
 - **main 的原窗口还开着时拒绝恢复**，避免同一个对话被两个进程同时写入。
 - tmux 会话名带目录名前缀，不同项目里同名的 agent 不会互相干扰。
 - 只恢复分屏结构，不恢复窗格的精确尺寸。
-- 目前只支持由 Claude Code 会话作为 main 建组。
+- **main 是 Codex 时要以 full access 运行，并且在 tmux 里启动**：沙箱会拦住 tmux 和分屏；Codex 的后台进程也不能直接控制 iTerm2，分屏请求要由 tmux 代发。
+- 匿名评议只能由 main 发起和推进。
 - 没有"移除成员"命令：`tmux kill-session -t <目录名>-<名称>`，再从 `.crew.json` 里删掉对应成员。
 
-模型列表、启动参数和会话存储位置在 2026-11 用 Claude Code 2.1、codex-cli 0.170、agy 1.5 验证过；这些 CLI 更新后可能需要调整。
+模型列表、启动参数和会话存储位置在 2026-11 用 Claude Code 2.1、codex-cli 0.170 / 0.171、agy 1.5 验证过；这些 CLI 更新后可能需要调整。
