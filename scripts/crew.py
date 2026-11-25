@@ -19,14 +19,14 @@ import tempfile
 import time
 import uuid
 
+import advise
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PANE = os.path.join(HERE, "pane.zsh")
 STATE = ".crew.json"
 ITERM = "/Applications/iTerm.app"
 EFFORT_SUFFIX = re.compile(r"-(low|medium|high|xhigh|max)$")
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-# agy families hidden from the `models` menu (still spawnable by explicit --model).
-AGY_MENU_SKIP = {"gemini-4-argon"}
 CLAUDE_MODELS = [("fable", "Claude Fable（最新）"), ("opus", "Claude Opus（最新）")]
 CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 AGENTS = ("claude", "codex", "agy")
@@ -589,21 +589,158 @@ def session_running(agent, sid):
 
 # ---------- commands ----------
 
-def cmd_models(args):
+def claude_models():
+    """Claude Code model aliases always resolve to the newest model of a family, so the
+    menu stays current across releases. Users can replace it in roles.json."""
+    user = advise.read_json(advise.ROLES, {}) or {}
+    rows = user.get("claude_models")
+    if isinstance(rows, list) and rows:
+        return [(r[0], r[1] if len(r) > 1 else r[0]) for r in rows if r]
+    return CLAUDE_MODELS
+
+
+def installed(agent):
+    return shutil.which(agent) is not None
+
+
+def all_options():
+    """Every model crew can start, in each CLI's own order."""
     rows = []
-    for x in codex_catalog()[:2]:
-        rows.append({"agent": "codex", "model": x["slug"], "label": x["display_name"],
-                     "efforts": [e["effort"] for e in x.get("supported_reasoning_levels", [])]})
-    agy = [(f, i) for f, i in agy_catalog().items() if f not in AGY_MENU_SKIP]
-    for fam, info in agy[:2]:
-        rows.append({"agent": "agy", "model": fam, "label": info["label"],
-                     "efforts": info["efforts"]})
-    for mid, label in CLAUDE_MODELS:
-        rows.append({"agent": "claude", "model": mid, "label": label,
-                     "efforts": CLAUDE_EFFORTS})
+    if installed("codex"):
+        for x in codex_catalog():
+            rows.append({"agent": "codex", "model": x["slug"], "label": x["display_name"],
+                         "efforts": [e["effort"] for e in x.get("supported_reasoning_levels", [])]})
+    if installed("agy"):
+        for fam, info in agy_catalog().items():
+            rows.append({"agent": "agy", "model": fam, "label": info["label"],
+                         "efforts": info["efforts"]})
+    if installed("claude"):
+        for mid, label in claude_models():
+            rows.append({"agent": "claude", "model": mid, "label": label,
+                         "efforts": CLAUDE_EFFORTS})
+    return rows
+
+
+def menu_options():
+    """The spawn menu: the first two models of each installed CLI."""
+    rows, count = [], {}
+    for o in all_options():
+        count[o["agent"]] = count.get(o["agent"], 0) + 1
+        if count[o["agent"]] <= 2:
+            rows.append(o)
+    return rows
+
+
+def cmd_models(args):
+    rows = all_options() if args.all else menu_options()
+    q = {} if args.no_quota else advise.quota(sorted({r["agent"] for r in rows}),
+                                               installed=installed)
     for i, r in enumerate(rows, 1):
         r["n"] = i
-    done(options=rows)
+        b = advise.bottleneck(r["agent"], r["model"], q) if q else None
+        r["quota"] = ("%.0f%%（%s）" % (b["remaining"], b["label"])) if b else None
+    done(options=rows, quota_notes={a: v["note"] for a, v in q.items()} or None)
+
+
+def cmd_quota(args):
+    agents = [args.agent] if args.agent else list(AGENTS)
+    done(quota=advise.quota(agents, refresh=args.refresh, installed=installed),
+         cache=advise.QUOTA_CACHE, ttl_seconds=advise.QUOTA_TTL)
+
+
+def cmd_advise(args):
+    opts = [dict(o, effort=args.effort) for o in (all_options() if args.all else menu_options())]
+    agents = sorted({o["agent"] for o in opts})
+    q = advise.quota(agents, installed=installed)
+    res = advise.advise(args.task, opts, q)
+    if "error" in res:
+        die(res["error"])
+    if not args.verbose:
+        res["candidates"] = res["candidates"][:args.top]
+    done(**res)
+
+
+RANKINGS_SCHEMA = {
+    "source": "https://arena.ai/leaderboard",
+    "fetched": "YYYY-MM-DD",
+    "categories": {"webdev": [{"name": "Model Name (Effort)", "rank": 1, "score": 1800,
+                               "cost": 2.5}]}}
+
+
+def cmd_rankings(args):
+    if args.action == "import":
+        try:
+            with open(args.file) as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            die("读不了 %s：%s" % (args.file, e))
+        errs = advise.validate_rankings(data)
+        if errs:
+            die("格式不对：" + "；".join(errs[:8]))
+        advise.write_json(advise.RANKINGS, data)
+    if args.action == "show":
+        data = advise.load_rankings()
+        if not data:
+            die("还没有排行数据（%s）。先按 SKILL.md 的步骤从 arena.ai 读取并 rankings import。"
+                % advise.RANKINGS)
+        menu = menu_options()
+        cats = [args.file] if args.file else list(data["categories"])
+        out = {}
+        for c in cats:
+            rows = sorted(data["categories"].get(c) or [], key=lambda r: r.get("rank") or 999)
+            for r in rows:
+                r["in_menu"] = None
+            for o in menu:
+                e = advise.match_entry(rows, o["agent"], o["model"], None, advise.all_rows(data))
+                if e:   # every effort variant of the newest matching version
+                    base = advise.split_variant(e["name"])[0]
+                    for r in rows:
+                        if advise.split_variant(r["name"])[0] == base:
+                            r["in_menu"] = "%s/%s" % (o["agent"], o["model"])
+            out[c] = rows
+        st = advise.rankings_status()
+        done(fetched=st.get("fetched"), age_days=st.get("age_days"), stale=st["stale"],
+             source=data.get("source"), note=data.get("note"), categories=out)
+        return
+    st = advise.rankings_status()
+    roles = advise.load_roles()
+    wanted = sorted({c for t in roles["tasks"].values() for c in t.get("arena") or []})
+    done(rankings=st, categories_used_by_tasks=wanted,
+         missing=[c for c in wanted if c not in (st.get("categories") or {})],
+         schema=RANKINGS_SCHEMA if (args.action == "schema" or st["stale"]) else None)
+
+
+def cmd_doctor(args):
+    checks = []
+
+    def add(name, ok, detail):
+        checks.append({"check": name, "ok": ok, "detail": detail})
+    add("macOS", sys.platform == "darwin", sys.platform)
+    add("python3 >= 3.8", sys.version_info >= (3, 8), sys.version.split()[0])
+    add("tmux", installed("tmux"), run("tmux", "-V")[1] or "未安装")
+    add("iTerm2", os.path.isdir(ITERM), ITERM)
+    for a in AGENTS:
+        if installed(a):
+            add(a, True, (run(a, "--version")[1].splitlines() or ["?"])[0])
+        else:
+            add(a, None, "未安装（可选）")
+    opts = all_options()
+    for a in AGENTS:
+        if installed(a):
+            n = sum(1 for o in opts if o["agent"] == a)
+            add("%s 模型列表" % a, n > 0, "%d 个模型" % n if n else "读不到模型列表，CLI 输出格式可能已变")
+    q = advise.quota([a for a in AGENTS if installed(a)], refresh=args.refresh, installed=installed)
+    for a, v in q.items():
+        add("%s 额度" % a, bool(v["pools"]) or None,
+            "%s %s" % (v["note"], "；".join("%s %.0f%%" % (p["label"], p["remaining"])
+                                            for p in v["pools"])))
+    st = advise.rankings_status()
+    add("排行榜", st["present"] and not st["stale"],
+        "未导入（%s）" % st["path"] if not st["present"]
+        else "抓取于 %s，%s 天前%s" % (st["fetched"], st["age_days"], "，已过期" if st["stale"] else ""))
+    roles = advise.load_roles()
+    add("个人分工配置", True, roles["user_file"] + ("" if roles["user_present"] else "（未创建，使用默认）"))
+    done(checks=checks, failed=[c["check"] for c in checks if c["ok"] is False])
 
 
 def intro_text(state, m, main_reachable):
@@ -717,8 +854,13 @@ def cmd_spawn(args):
                 m["session_id"] = sid
                 break
         store(d, state)
+    warn = None
+    b = advise.bottleneck(args.agent, model, advise.quota([args.agent], installed=installed))
+    if b and b["remaining"] < advise.load_roles()["policy"].get("min_quota", 20):
+        warn = "%s 只剩 %.0f%%%s。可用 advise 看替代模型。" % (
+            b["label"], b["remaining"], "，%s 重置" % b["resets"] if b["resets"] else "")
     done(name=name, session=session, tty=tty, status=status, command=" ".join(argv),
-         session_id=m["session_id"], state_file=os.path.join(d, STATE),
+         session_id=m["session_id"], state_file=os.path.join(d, STATE), quota_warning=warn,
          note=None if status == "ready" else "agent 未就绪：用 read 查看窗格内容并处理。")
 
 
@@ -1090,8 +1232,32 @@ def main():
     p = argparse.ArgumentParser(prog="crew")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("models", help="top 2 models of codex / agy / claude (agy skips AGY_MENU_SKIP)")
+    s = sub.add_parser("models", help="top 2 models of each installed CLI, with remaining quota")
+    s.add_argument("--all", action="store_true", help="every model, not just the first two per CLI")
+    s.add_argument("--no-quota", action="store_true")
     s.set_defaults(fn=cmd_models)
+
+    s = sub.add_parser("quota", help="remaining quota per CLI (local reads only)")
+    s.add_argument("--agent", choices=AGENTS)
+    s.add_argument("--refresh", action="store_true", help="ignore the 10-minute cache")
+    s.set_defaults(fn=cmd_quota)
+
+    s = sub.add_parser("advise", help="recommend a model for a task type")
+    s.add_argument("--task", required=True)
+    s.add_argument("--effort", default="high")
+    s.add_argument("--top", type=int, default=6)
+    s.add_argument("--all", action="store_true", help="consider every model, not only the menu")
+    s.add_argument("--verbose", action="store_true", help="list every candidate")
+    s.set_defaults(fn=cmd_advise)
+
+    s = sub.add_parser("rankings", help="show, or import, the leaderboard snapshot used by advise")
+    s.add_argument("action", nargs="?", choices=["status", "show", "import", "schema"], default="status")
+    s.add_argument("file", nargs="?", help="import: the JSON file; show: one category key")
+    s.set_defaults(fn=cmd_rankings)
+
+    s = sub.add_parser("doctor", help="check dependencies, model lists, quota sources, config")
+    s.add_argument("--refresh", action="store_true")
+    s.set_defaults(fn=cmd_doctor)
 
     s = sub.add_parser("spawn", help="open a new agent in a split pane")
     s.add_argument("--name", required=True)

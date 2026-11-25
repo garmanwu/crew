@@ -1,19 +1,52 @@
 ---
 name: crew
-description: 在 iTerm2 里给当前会话分屏，新开一个跑在 tmux 里的 agent（codex / agy / claude，可指定模型和 effort），组员之间用 tmux 互发消息；能让组员对一个议题做三轮匿名评议（独立立场、互评、自行修正，不投票，保留少数派）；还能把整组保存到项目目录并一键恢复窗口、模型、effort 和历史对话。用户运行 /crew（Codex 里是 $crew），或要求"新开一个 agent / 分屏起个 codex / 保存 agent 组 / 恢复 agent 组 / 给 design 发消息 / 让大家评议一下 / 匿名互评 / 开个 panel"时使用。
-argument-hint: "[spawn [名称] [agent] [模型] [effort] | send <名称> <内容> | read <名称> | panel <议题> | status | save | restore]"
+description: Split the current iTerm2 pane and start another coding agent (Codex, Antigravity agy or Claude Code, any model and effort) in its own tmux session; members message each other, run a three-round anonymous review that maps disagreements instead of voting, read each CLI's remaining quota and recommend a model per task from quota, a leaderboard snapshot and personal preferences, and save and restore the whole group with its conversations. macOS + iTerm2. Use for /crew ($crew in Codex) or requests like open a codex agent, message design, review this anonymously, which model for frontend, show quota, save or restore the crew. 在 iTerm2 分屏新开 tmux 里的 agent（codex / agy / claude，可指定模型和 effort），组员互发消息，三轮匿名评议，读取三家额度并按任务推荐模型，保存与一键恢复整组。用户运行 /crew，或说新开一个 agent、给 design 发消息、让大家评议一下、做前端用哪个模型、看看额度、保存或恢复 agent 组时使用。
+version: 1.2.0
+argument-hint: "[spawn [name] [agent] [model] [effort] | send <name> <text> | read <name> | advise <task> | quota | rankings | panel <topic> | status | save | restore | doctor]"
+allowed-tools:
+  - Bash(python3 ~/.claude/skills/crew/scripts/crew.py *)
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/crew.py *)
+  - WebFetch(domain:arena.ai)
+metadata:
+  openclaw:
+    emoji: "🧑‍🤝‍🧑"
+    homepage: https://github.com/garmanwu/crew
+    os: ["macos"]
+    requires:
+      bins: ["python3", "tmux"]
+      anyBins: ["codex", "agy", "claude"]
+    envVars:
+      - name: CREW_NO_QUOTA
+        required: false
+        description: 设为 1 时关闭全部额度读取。
+      - name: CODEX_HOME
+        required: false
+        description: Codex 数据目录（默认 ~/.codex），用于读会话 ID 和额度事件。
+      - name: CLAUDE_CONFIG_DIR
+        required: false
+        description: Claude Code 配置目录，用于读 /usage 缓存。
+      - name: XDG_CONFIG_HOME
+        required: false
+        description: 个人配置位置（默认 ~/.config/crew）。
+      - name: XDG_CACHE_HOME
+        required: false
+        description: 额度缓存和探测目录位置（默认 ~/.cache/crew）。
 ---
 
 # crew
 
+> **English overview.** crew opens another agent CLI (Codex, Antigravity `agy`, Claude Code) in an iTerm2 split pane, each in its own tmux session, so you can watch and steer it live. Members message each other through tmux; the main session can run a three-round anonymous panel that produces a map of agreements and disagreements; `quota` and `advise` read each CLI's remaining quota locally and recommend a model for a task; `save` / `restore` bring the whole group back with its conversations. Requires macOS, iTerm2, tmux, python3 ≥ 3.8 and at least one of the three CLIs. The instructions below are in Chinese; follow them as written and **always reply to the user in the user's own language**. Script output is JSON with Chinese messages; translate when relaying. English README: `README.en.md`.
+
 所有操作都通过一个脚本完成，输出是 JSON（`ok: false` 时看 `error`）：
 
 ```bash
-CREW=~/.claude/skills/crew/scripts/crew.py
+CREW=<本 skill 所在目录>/scripts/crew.py   # 例如 ~/.claude/skills/crew/scripts/crew.py
 python3 $CREW <子命令> ...
 ```
 
-在项目目录里运行（脚本会向上查找 `.crew.json`）。需要 macOS、iTerm2、tmux，以及要用到的 agent CLI。
+`CREW` 用本文件所在目录推出来（Claude Code 里可用 `${CLAUDE_SKILL_DIR}`；从 ClawHub 或其他位置安装时以实际目录为准）。
+
+在项目目录里运行（脚本会向上查找 `.crew.json`）。需要 macOS、iTerm2、tmux、python3（3.8 起，系统自带的即可），以及至少一个 agent CLI。环境有问题先跑 `python3 $CREW doctor`。
 
 这个 skill 在 Claude Code、Codex、agy 里都能用，三处是同一份文件（`~/.codex/skills/crew` 和 `~/.gemini/config/skills/crew` 是指向 `~/.claude/skills/crew` 的软链接），脚本路径统一用上面这个。
 
@@ -27,8 +60,8 @@ python3 $CREW <子命令> ...
 
 ## spawn：新开一个 agent
 
-1. `python3 $CREW models` 得到 6 个选项（codex、agy、claude 各前两个模型，带可用 effort；agy 跳过 `crew.py` 里 `AGY_MENU_SKIP` 列出的系列，目前是 argon，所以给出 neon 和 hydrogen）。
-2. 用户在参数里已经给全（名称、agent、模型、effort）就直接到第 3 步。否则把 6 个选项列成编号清单，一次问清三件事：选哪个编号、agent 叫什么名字（如 `design`）、effort（默认 `high`）。让用户用一行回复，例如 `2 design high`。不要用 AskUserQuestion 做六选一（它最多 4 个选项）。
+1. `python3 $CREW models` 得到菜单：每个已安装 CLI 的前两个模型（按 CLI 自己的顺序，带可用 effort 和 `quota` 剩余额度）。没装的 CLI 不出现。
+2. 用户在参数里已经给全（名称、agent、模型、effort）就直接到第 3 步。用户只说了任务（"开个做前端的"）就先跑 `advise`（见下文），把推荐和理由告诉用户，让用户确认或换。否则把菜单列成编号清单（带剩余额度），一次问清三件事：选哪个编号、agent 叫什么名字（如 `design`）、effort（默认 `high`）。让用户用一行回复，例如 `2 design high`。不要用 AskUserQuestion 做多选一（它最多 4 个选项）。剩余额度低于 20% 的选项要标出来。
 3. 启动：
 
    ```bash
@@ -44,7 +77,7 @@ python3 $CREW <子命令> ...
    - 默认分屏位置：第 1 个在 main 右侧，第 2 个在第 1 个下方，第 3 个在 main 下方，之后依次在已有 agent 右侧。要指定位置用 `--from <成员名> --split v|h`（v 左右分，h 上下分）。
    - codex 默认以 full access 启动（`-s danger-full-access -a never`）：执行命令不受沙箱限制，也不请求审批，范围是整台机器；这样它才能连上 tmux 主动给组员发消息。用户明确要求保留沙箱时加 `--sandbox`，此时 codex 不能主动发消息，只能被读取。
 4. 脚本会等 agent 就绪、自动确认"信任此文件夹"对话框、给新 agent 发一条说明（组里有谁、怎么发消息），并记录会话 ID。看返回的 `status`：
-   - `ready`：成功。告诉用户名称、模型、effort。
+   - `ready`：成功。告诉用户名称、模型、effort。返回里有 `quota_warning` 时一并转告。
    - `trust_prompt` / `timeout` / `exited`：用 `read` 看窗格里是什么，把情况告诉用户。
 
 ## send / read：通讯
@@ -101,6 +134,69 @@ python3 $CREW panel reveal    # 揭晓代号对应的成员和模型
 
 - 盲写和匿名靠指令约束，不是强制隔离：成员在同一台机器上，技术上能读到别人的草稿和代号表；文风也可能暴露身份。
 - 固定三轮。想对某个分歧再深入，就以那条分歧为议题新开一次评议。
+
+## advise / quota：按任务和额度选模型
+
+```bash
+python3 $CREW advise --task frontend        # 推荐 + 候选清单和理由
+python3 $CREW quota                         # 三家剩余额度（10 分钟缓存，--refresh 强制重读）
+```
+
+- 任务类型在 `defaults.json` 的 `tasks` 里（frontend、coding、agentic、review、writing、vision、research、3d、labeling），每个对应排行榜的若干分类。用户说的任务对不上就选最接近的，并说明选了哪个。
+- 规则（返回的 `rule` 字段）：剩余额度 ≥ `min_quota`（默认 20%）且与最高分相差 ≤ `elo_margin`（默认 50，约等于 57% 胜率）的候选里，选单次成本最低的；用户偏好（`prefer`）排在最前；额度不足的仍列出但排最后。没有排行分类的任务（如 3d、labeling）只按偏好和额度排序。
+- 汇报时给出推荐、它的 `why`，以及一两个备选；不要只报模型名。
+- 默认只在菜单（每个 CLI 前两个）里选，`--all` 考虑全部模型。
+- 额度读不到时显示为未知，不阻止 spawn。
+
+### 个人偏好：`~/.config/crew/roles.json`
+
+用户说"X 适合做 Y""以后 Y 都用 X""别给组员用 Z"时，写进这个文件（没有就新建），不要改 skill 目录里的 `defaults.json`：
+
+```json
+{
+  "tasks": {
+    "3d":       {"prefer": ["gpt-6.2-astra"]},
+    "frontend": {"prefer": ["gemini-4-neon", "gemini-4-carbon"]},
+    "slides":   {"label": "做幻灯片", "arena": ["webdev"], "prefer": []}
+  },
+  "policy": {"min_quota": 20, "elo_margin": 50, "avoid_for_members": []},
+  "claude_models": [["fable", "Claude Fable（最新）"], ["opus", "Claude Opus（最新）"]]
+}
+```
+
+`tasks` 可以覆盖已有任务，也可以新增；`prefer` 和 `avoid` 按模型名的子串匹配。`claude_models` 替换 Claude 的菜单（别名始终指向该系列最新版本）。
+
+### 排行榜：`~/.config/crew/rankings.json`
+
+`python3 $CREW rankings` 查看状态；`rankings show [分类键]` 列出快照里的排名（`in_menu` 标出菜单里对应的模型），用户要看排行榜时用它，并注明抓取日期。返回 `stale: true`（没有，或超过 30 天）时，如果用户在让你挑模型，先更新：
+
+1. 用你的网页读取工具打开 https://arena.ai/leaderboard 及需要的分类页。脚本自己不联网（该站会拒绝脚本请求）。
+2. 按返回的 `schema` 写一个 JSON：`fetched` 填今天日期，`categories` 的键用下表，每个分类至少记录前几名和菜单里各模型的 `name`（照抄页面上的名字，含括号里的 effort）、`rank`、`score`，页面给了单次成本就填 `cost`（美元）。页面没有的不要编。
+   | 页面上的名称 | 键 |
+   |---|---|
+   | Agent Arena Index / Work / Coding / Chat / Task Outcome / Steering / Tool Use Index | agent / work / coding / chat / task-outcome / steering / tool-use |
+   | Text / Vision / Document / Search | text / vision / document / search |
+   | WebDev / Image-to-WebDev | webdev / image-to-webdev |
+3. `python3 $CREW rankings import <文件>`，格式不对会报出哪一项。
+4. 读不到页面就跳过，`advise` 会只按额度和偏好推荐，并告诉用户排行数据缺失或过期。
+
+## doctor
+
+`python3 $CREW doctor`：检查 macOS、python3、tmux、iTerm2、各 CLI 及其模型列表、三家额度能否读到、排行榜和个人配置。CLI 升级后行为不对时先跑它，把结果给用户（或贴到 issue）。
+
+## 权限与隐私
+
+- **Codex 组员默认 full access**（`-s danger-full-access -a never`）：不受沙箱限制、不请求审批，范围是整台机器。这是组员能通过 tmux 主动发消息的前提；不需要时用 `--sandbox`。第一次给用户开 Codex 组员时说明这一点。
+- **额度只在本机读取**，不联网、不上传：
+  - Codex：读 `~/.codex/sessions/` 下最近的会话记录里的 `rate_limits` 事件；
+  - Claude Code：读 `~/.claude.json` 里 `/usage` 的缓存（只用 `cachedUsageUtilization` 和账户 ID 做匹配）；缓存超过 10 分钟时，在隐藏终端里启动一次 `claude -- /usage`（关闭 hooks、MCP 和工具，不发送对话）刷新；
+  - agy：在隐藏终端里启动一次 `agy`，用 `--settings` 临时注入状态栏命令（指向本 skill 的 `advise.py`），读取它交给状态栏的额度数据，不发送对话；
+  - 两个探测都在 crew 自己的空目录 `~/.cache/crew/probe` 里运行，首次会自动确认"信任此文件夹"。
+  - `CREW_NO_QUOTA=1` 关闭以上全部读取。
+- **排行数据**只由 main 用自己的网页工具读取，脚本不联网。
+- 写入的文件：项目内 `.crew.json`、`.crew/`、`<组名>-crew.command`；用户目录 `~/.config/crew/`（偏好、排行）和 `~/.cache/crew/`（额度缓存）。
+- Claude Code 里，frontmatter 的 `allowed-tools` 让本 skill 的脚本命令和读取 arena.ai 不必逐次确认；Codex、agy 按各自的权限设置处理。
+
 
 ## status
 
