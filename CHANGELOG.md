@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.3 — 2026-11-26
+
+- The crew / sub-agent / direct-call comparison is now a Markdown table with ★ ratings and short notes.
+
 ## 1.3.2 — 2026-11-26
 
 - README, README.en and SKILL.md: when to use crew, a sub-agent or direct `codex exec` calls, with a rating table.

@@ -24,20 +24,18 @@ A skill for Claude Code, Codex and Antigravity (`agy`): split the current iTerm2
 
 Assuming all three can reach Claude, Codex and agy (a sub-agent calls `codex exec` / `agy` from the shell):
 
-```
-aspect                           crew+tmux   sub-agent   direct call (codex exec ...)
--------------------------------  ---------   ---------   ----------------------------
-models (Claude/codex/agy)        *****       ***..       ***..  one-shot only
-memory across days               *****       *....       *....
-user watches and steers live     *****       *....       *....
-tells you when done / failed     **...       *****       ****.  ends when the process exits
-robustness (drops, closed panes) **...       *****       ****.
-parallel work without clashes    **...       *****       ***..
-hand-over cost                   *****       **...       *....
-spreads quota across vendors     *****       **...       ****.
-members talk to each other       *****       *....       .....
-main's management load           **...       ****.       ****.
-```
+| Aspect | crew + tmux | sub-agent | direct call (codex exec ...) |
+|---|---|---|---|
+| Models (Claude / codex / agy) | ✅ ★★★★★ full interactive sessions | ✅ ★★★ codex and agy one-shot only | ★★★ one-shot only |
+| Memory across days | ★★★★★ | ★ starts from zero each time | ★ |
+| User watches and steers live | ★★★★★ | ★ | ★ |
+| Tells you when done or failed | ★★ covered by `board`, `watch` | ★★★★★ built in | ★★★★ ends when the process exits |
+| Robustness (network drops, closed panes, swapped model) | ★★ | ★★★★★ | ★★★★ |
+| Parallel work without clashes (own copy of the code) | ★★ one shared working tree | ★★★★★ can get its own | ★★★ |
+| Hand-over cost (explaining the background) | ★★★★★ members already know | ★★ every brief must be complete | ★ |
+| Spreads quota across vendors | ★★★★★ | ★★ orchestration all on Claude | ★★★★ |
+| Members talk to each other | ★★★★★ point-to-point | ★ each reports to main only | — |
+| Main's management load | ★★ | ★★★★ | ★★★★ |
 
 | Situation | Use |
 |---|---|

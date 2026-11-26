@@ -1,7 +1,7 @@
 ---
 name: crew
 description: Split the current iTerm2 pane and start another coding agent (Codex, Antigravity agy or Claude Code, any model and effort) in its own tmux session; members message each other, run a three-round anonymous review that maps disagreements instead of voting, read each CLI's remaining quota and recommend a model per task from quota, a leaderboard snapshot and personal preferences, and save and restore the whole group with its conversations. macOS + iTerm2. Use for /crew ($crew in Codex) or requests like open a codex agent, message design, review this anonymously, which model for frontend, show quota, save or restore the crew. 在 iTerm2 分屏新开 tmux 里的 agent（codex / agy / claude，可指定模型和 effort），组员互发消息，三轮匿名评议，读取三家额度并按任务推荐模型，保存与一键恢复整组。用户运行 /crew，或说新开一个 agent、给 design 发消息、让大家评议一下、做前端用哪个模型、看看额度、保存或恢复 agent 组时使用。
-version: 1.3.2
+version: 1.3.3
 argument-hint: "[spawn [name] [agent] [model] [effort] | send <name> <text> | read <name> | advise <task> | quota | rankings | panel <topic> | board | task | status | save | restore | doctor]"
 allowed-tools:
   - Bash(python3 ~/.claude/skills/crew/scripts/crew.py *)
@@ -56,20 +56,18 @@ python3 $CREW <子命令> ...
 
 同样能用上 Claude、codex、agy 三家时（subagent 由 Claude 子任务在命令行里调 `codex exec` / `agy`），三种做法各有所长：
 
-```
-维度                          crew+tmux   subagent   直接调用(codex exec 等)
-----------------------------  ---------   --------   ----------------------
-能用的模型(Claude/codex/agy)  *****       ***..      ***..  只能一问一答
-长期记忆(连着干几天)          *****       *....      *....
-用户实时看、随时插手          *****       *....      *....
-完成/出错会主动通知           **...       *****      ****.  进程退出即结束
-稳定性(断线/窗口/模型被换)    **...       *****      ****.
-并行时互不干扰(各自一份代码)  **...       *****      ***..
-交接成本(要说清楚背景)        *****       **...      *....
-额度分摊(三家订阅都用上)      *****       **...      ****.
-成员之间互相商量              *****       *....      .....
-main 的管理负担               **...       ****.      ****.
-```
+| 维度 | crew + tmux | subagent | 直接调用（codex exec 等） |
+|---|---|---|---|
+| 能用的模型（Claude / codex / agy） | ✅ ★★★★★ 各自完整的交互会话 | ✅ ★★★ codex、agy 只能一问一答 | ★★★ 只能一问一答 |
+| 长期记忆（连着干几天） | ★★★★★ | ★ 每次从零开始 | ★ |
+| 用户实时看、随时插手 | ★★★★★ | ★ | ★ |
+| 完成、出错会主动通知 | ★★ 靠 `board`、`watch` 补上 | ★★★★★ 系统自带 | ★★★★ 进程退出即结束 |
+| 稳定性（断线、窗口被关、模型被换） | ★★ | ★★★★★ | ★★★★ |
+| 并行时互不干扰（各自一份代码） | ★★ 共用一个工作目录 | ★★★★★ 可以各开一份 | ★★★ |
+| 交接成本（要说清楚背景） | ★★★★★ 成员本来就知道 | ★★ 每次都得写清楚 | ★ |
+| 额度分摊（三家订阅都用上） | ★★★★★ | ★★ 编排都算在 Claude 上 | ★★★★ |
+| 成员之间互相商量 | ★★★★★ 点对点发消息 | ★ 只能各自向 main 汇报 | — |
+| main 的管理负担 | ★★ | ★★★★ | ★★★★ |
 
 | 场景 | 用哪个 |
 |---|---|
