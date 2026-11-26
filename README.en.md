@@ -20,6 +20,33 @@ A skill for Claude Code, Codex and Antigravity (`agy`): split the current iTerm2
 
 **Long projects.** Need to shut down mid-discussion? Save. Next time, double-click one file and the whole group comes back to the same panes with its context.
 
+## Compared with sub-agents and direct calls
+
+Assuming all three can reach Claude, Codex and agy (a sub-agent calls `codex exec` / `agy` from the shell):
+
+```
+aspect                           crew+tmux   sub-agent   direct call (codex exec ...)
+-------------------------------  ---------   ---------   ----------------------------
+models (Claude/codex/agy)        *****       ***..       ***..  one-shot only
+memory across days               *****       *....       *....
+user watches and steers live     *****       *....       *....
+tells you when done / failed     **...       *****       ****.  ends when the process exits
+robustness (drops, closed panes) **...       *****       ****.
+parallel work without clashes    **...       *****       ***..
+hand-over cost                   *****       **...       *....
+spreads quota across vendors     *****       **...       ****.
+members talk to each other       *****       *....       .....
+main's management load           **...       ****.       ****.
+```
+
+| Situation | Use |
+|---|---|
+| A multi-day project split into modules, watched by the user (one long-lived owner per module) | **crew** |
+| A one-off, well-bounded job: review some code, chase one bug, read files and conclude | **sub-agent** |
+| Bulk stateless calls: grading items one by one, labelling images | **direct calls** (run in the background by a crew member or a script) |
+
+They combine: crew members own modules, one-off jobs go to sub-agents, bulk judging runs as `codex exec` in a member's background. Cover crew's weak spots (no completion signal, network drops) with `board`, `watch --nudge` and members sending `send --to main` when they finish.
+
 ## Install
 
 From ClawHub:
@@ -114,6 +141,9 @@ python3 $CREW spawn --name design --agent codex --model gpt-6.2-astra --effort h
 python3 $CREW send --to design "Please review section 3 of SPEC.md"
 python3 $CREW read --name design --lines 80
 python3 $CREW status
+python3 $CREW board --text      # whole group: busy/idle/offline, current and scheduled tasks; flags a swapped Codex model
+python3 $CREW task --now "…" --next "…"   # record your own tasks
+python3 $CREW watch --nudge     # find members stopped after a connection error and wake them
 python3 $CREW save
 python3 $CREW restore --dir <project folder>
 ```

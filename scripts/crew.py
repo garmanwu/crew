@@ -874,7 +874,20 @@ def need_state(args):
 
 def cmd_send(args):
     d, state = need_state(args)
-    who = caller(state, state["group"])[0]
+    who, sess = caller(state, state["group"])[:2]
+    reply = ""
+    sessions = {x["session"] for x in state["members"]}
+    if who == "guest" or (sess and sess not in sessions):
+        # A member of another group writing across (send --dir <other project>): name it by
+        # its own group so the receiver knows who it is and how to answer.
+        home = find_dir(os.getcwd())
+        hs = load(home) if home != d else None
+        hwho = caller(hs, hs["group"])[0] if hs else "guest"
+        if hs and hwho != "guest":
+            who = "%s/%s" % (hs["group"], hwho)
+            reply = "（回复：crew send --dir %s --to %s）" % (home, hwho)
+        elif sess:
+            who = sess
     m = member(state, args.to)
     if not m:
         die("没有成员 %s。现有：%s" % (args.to, "、".join(x["name"] for x in state["members"])))
@@ -888,8 +901,140 @@ def cmd_send(args):
             and tid != me.get("session_id"):
         me["session_id"] = tid
         store(d, state)
-    send_text(m["session"], "[from %s] %s" % (who, args.message))
+    send_text(m["session"], "[from %s]%s %s" % (who, reply, args.message))
     done(sent_to=m["name"], sender=who)
+
+
+TASKS = os.path.join(".crew", "tasks.json")
+BUSY_MARKS = ("esc to interrupt", "esc to cancel", "Working (", "Thinking", "Running…")
+
+
+def load_tasks(d):
+    p = os.path.join(d, TASKS)
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def store_tasks(d, tasks):
+    p = os.path.join(d, TASKS)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p + ".tmp", "w") as f:
+        json.dump(tasks, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(p + ".tmp", p)
+
+
+def cmd_task(args):
+    d, state = need_state(args)
+    who = caller(state, state["group"])[0]
+    name = args.for_ or who
+    if args.for_ and who != "main":
+        die("只有 main 能替别人记任务；记自己的不要加 --for。")
+    if not member(state, name):
+        die("没有成员 %s。现有：%s" % (name, "、".join(x["name"] for x in state["members"])))
+    tasks = load_tasks(d)
+    t = tasks.get(name, {"now": "", "next": []})
+    if args.done:
+        t["now"] = ""
+    if args.now is not None:
+        t["now"] = args.now.strip()
+    if args.clear_next:
+        t["next"] = []
+    t["next"] = t.get("next", []) + [x.strip() for x in args.next if x.strip()]
+    t["updated"] = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+    t["by"] = who
+    tasks[name] = t
+    store_tasks(d, tasks)
+    done(member=name, **{k: t[k] for k in ("now", "next", "updated")})
+
+
+def busy_state(m):
+    if not alive(m["session"]):
+        return "离线"
+    rc, out = capture(m["session"], 40)
+    if rc != 0:
+        return "未知"
+    tail = "\n".join(out.splitlines()[-25:])
+    return "忙" if any(k in tail for k in BUSY_MARKS) else "空闲"
+
+
+STALL_MARKS = ("API Error", "Connection dropped", "ECONNRESET", "Resend your message",
+               "Error running remote compact", "No response from API", "stream disconnected",
+               "Connection failed")
+NUDGE = ("刚才连接中断，你停在了提示符上。请从断点继续你登记的任务：%s。已完成的部分保留，"
+         "做完照常更新 crew task 并报告。")
+
+
+def stalled(m):
+    """A member idle at its prompt right after a connection error (not finished, just stopped)."""
+    if not alive(m["session"]):
+        return None
+    rc, out = capture(m["session"], 40)
+    if rc != 0:
+        return None
+    tail = "\n".join(out.splitlines()[-25:])
+    if any(k in tail for k in BUSY_MARKS):
+        return None
+    hit = [k for k in STALL_MARKS if k in tail]
+    return hit[0] if hit else None
+
+
+def cmd_watch(args):
+    d, state = need_state(args)
+    tasks = load_tasks(d)
+    found = []
+    for m in state["members"]:
+        if m["name"] == "main":
+            continue
+        why = stalled(m)
+        if not why:
+            continue
+        now = tasks.get(m["name"], {}).get("now", "")
+        item = {"name": m["name"], "error": why, "task": now, "nudged": False}
+        if args.nudge and now:
+            send_text(m["session"], "[from crew-watch] " + NUDGE % now)
+            item["nudged"] = True
+        found.append(item)
+    done(group=state["group"], stalled=found)
+
+
+def live_model(m):
+    """Model shown in a Codex pane's footer (e.g. 'GPT-6.2-Astra xhigh'), or None."""
+    if m["agent"] != "codex" or not alive(m["session"]):
+        return None
+    rc, out = capture(m["session"], 8)
+    hits = re.findall(r"(GPT-[\w.\-]+)\s+(low|medium|high|xhigh|max)", out or "")
+    return ("%s %s" % hits[-1]) if hits else None
+
+
+def cmd_board(args):
+    d, state = need_state(args)
+    tasks = load_tasks(d)
+    rows = []
+    for m in state["members"]:
+        t = tasks.get(m["name"], {})
+        live = live_model(m)
+        drift = bool(live and m.get("model") and m["model"].replace("gpt-", "").lower()
+                     not in live.lower().replace("gpt-", ""))
+        rows.append({"name": m["name"], "agent": m["agent"], "model": m.get("model"),
+                     "live_model": live, "model_changed": drift,
+                     "state": busy_state(m), "now": t.get("now", ""), "next": t.get("next", []),
+                     "updated": t.get("updated", "")})
+    if not args.text:
+        done(group=state["group"], dir=d, members=rows)
+        return
+    print("%s（%s）" % (state["group"], d))
+    for r in rows:
+        print("\n● %s  [%s · %s %s]  %s" % (r["name"], r["state"], r["agent"], r["model"] or "",
+                                            ("更新于 " + r["updated"]) if r["updated"] else "未登记任务"))
+        if r["model_changed"]:
+            print("  ⚠ 模型被换了：配置 %s，窗格里是 %s" % (r["model"], r["live_model"]))
+        print("  现在：%s" % (r["now"] or "—"))
+        for i, n in enumerate(r["next"], 1):
+            print("  排期 %d：%s" % (i, n))
 
 
 def cmd_read(args):
@@ -1290,6 +1435,25 @@ def main():
     s = sub.add_parser("status")
     s.add_argument("--dir", default=os.getcwd())
     s.set_defaults(fn=cmd_status)
+
+    s = sub.add_parser("task", help="record what you (or, for main, another member) are doing now and next")
+    s.add_argument("--for", dest="for_", metavar="NAME", help="main only: set another member's tasks")
+    s.add_argument("--now", help="current task, one line")
+    s.add_argument("--next", action="append", default=[], help="a scheduled task; repeat for several")
+    s.add_argument("--done", action="store_true", help="current task finished: clear 'now'")
+    s.add_argument("--clear-next", action="store_true", help="drop the scheduled list before adding --next")
+    s.add_argument("--dir", default=os.getcwd())
+    s.set_defaults(fn=cmd_task)
+
+    s = sub.add_parser("watch", help="find members stopped at their prompt after a connection error")
+    s.add_argument("--nudge", action="store_true", help="send each stalled member a 'continue' message")
+    s.add_argument("--dir", default=os.getcwd())
+    s.set_defaults(fn=cmd_watch)
+
+    s = sub.add_parser("board", help="every member: busy or idle, current and scheduled tasks")
+    s.add_argument("--text", action="store_true", help="a readable table instead of JSON")
+    s.add_argument("--dir", default=os.getcwd())
+    s.set_defaults(fn=cmd_board)
 
     s = sub.add_parser("save", help="refresh session ids, write the .command launcher")
     s.add_argument("--main-model")

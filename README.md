@@ -20,6 +20,33 @@
 
 **长期项目。** 讨论到一半要关机，保存一下；下次双击一个文件，整组 agent 带着各自的上下文回到原来的分屏位置。
 
+## 和 subagent、直接调用比
+
+同样能用上 Claude、codex、agy 三家时（subagent 由 Claude 子任务在命令行里调 `codex exec` / `agy`），三种做法各有所长：
+
+```
+维度                          crew+tmux   subagent   直接调用(codex exec 等)
+----------------------------  ---------   --------   ----------------------
+能用的模型(Claude/codex/agy)  *****       ***..      ***..  只能一问一答
+长期记忆(连着干几天)          *****       *....      *....
+用户实时看、随时插手          *****       *....      *....
+完成/出错会主动通知           **...       *****      ****.  进程退出即结束
+稳定性(断线/窗口/模型被换)    **...       *****      ****.
+并行时互不干扰(各自一份代码)  **...       *****      ***..
+交接成本(要说清楚背景)        *****       **...      *....
+额度分摊(三家订阅都用上)      *****       **...      ****.
+成员之间互相商量              *****       *....      .....
+main 的管理负担               **...       ****.      ****.
+```
+
+| 场景 | 用哪个 |
+|---|---|
+| 多天、分模块、用户要盯着的项目（每个模块一个长期负责人） | **crew** |
+| 一次性、边界清楚的活：审一段代码、查一个问题、读一堆文件给结论 | **subagent** |
+| 大批量、无状态的重复调用：逐题判分、逐张标注 | **直接调用**（由某个 crew 成员或脚本在后台批量跑） |
+
+三者可以叠加：crew 成员负责模块，零散任务交给 subagent，批量判定在成员的后台用 `codex exec` 跑。crew 的短板（没有完成通知、怕断线）用 `board`、`watch --nudge` 和成员做完后 `send --to main` 补上。
+
 ## 安装
 
 从 ClawHub：
@@ -101,6 +128,9 @@ python3 $CREW spawn --name design --agent codex --model gpt-6.2-astra --effort h
 python3 $CREW send --to design "请看一下 SPEC.md 第 3 节"
 python3 $CREW read --name design --lines 80
 python3 $CREW status
+python3 $CREW board --text      # 全组：忙/空闲/离线、现在做什么、排期；codex 模型被换会标出
+python3 $CREW task --now "…" --next "…"   # 登记自己的任务
+python3 $CREW watch --nudge     # 找出断线停住的成员并叫醒
 python3 $CREW save
 python3 $CREW restore --dir <项目目录>
 ```
