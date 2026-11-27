@@ -1,7 +1,7 @@
 ---
 name: crew
 description: Split the current iTerm2 pane and start another coding agent (Codex, Antigravity agy or Claude Code, any model and effort) in its own tmux session; members message each other, run a three-round anonymous review that maps disagreements instead of voting, read each CLI's remaining quota and recommend a model per task from quota, a leaderboard snapshot and personal preferences, and save and restore the whole group with its conversations. macOS + iTerm2. Use for /crew ($crew in Codex) or requests like open a codex agent, message design, review this anonymously, which model for frontend, show quota, save or restore the crew. 在 iTerm2 分屏新开 tmux 里的 agent（codex / agy / claude，可指定模型和 effort），组员互发消息，三轮匿名评议，读取三家额度并按任务推荐模型，保存与一键恢复整组。用户运行 /crew，或说新开一个 agent、给 design 发消息、让大家评议一下、做前端用哪个模型、看看额度、保存或恢复 agent 组时使用。
-version: 1.3.3
+version: 1.4.0
 argument-hint: "[spawn [name] [agent] [model] [effort] | send <name> <text> | read <name> | advise <task> | quota | rankings | panel <topic> | board | task | status | save | restore | doctor]"
 allowed-tools:
   - Bash(python3 ~/.claude/skills/crew/scripts/crew.py *)
@@ -117,6 +117,22 @@ python3 $CREW read --name design --lines 80
 - `send` 会自动加上 `[from <发送者>]` 前缀，支持多行。
 - 发完消息对方需要时间处理；用 `read` 查看结果。还在生成时过一会儿再读，不要连续快速轮询。
 - 给不在 tmux 里的成员发消息会报错（常见于 main 尚未恢复过）。
+
+### 投递方式：不打断用户正在输入的内容
+
+用户可能正在某个窗格的输入框里打字。`send`（以及 panel、`watch --nudge` 发出的消息）按收件方选择投递方式，返回的 `via` 字段说明实际走了哪条：
+
+| 收件方 | 方式 | `via` |
+|---|---|---|
+| Codex | `codex queue` 放进对方当前对话的队列，不碰输入框；空闲时立即处理，忙时这一轮做完再处理 | `codex-queue` |
+| agy | `agy agentapi send-message` 直接送进对话，不碰输入框；agy 窗格不显示收到的原文，crew 在该窗格的 tmux 状态栏提示一行 | `agentapi` |
+| Claude，发件方也是 Claude | 脚本不发送，返回 `delivered: false, use: "SendMessage", to: <会话名>, message: <全文>`。**收到这个结果就用 SendMessage 工具把 `message` 原样发给 `to`**；工具不可用或被拒时，用 `send --typed` 重发 | — |
+| 其余情况（Claude 收件方遇到非 Claude 发件方、上面的方式不可用） | 只在对方输入框为空、且 8 秒内没人在该窗格按键时才打字提交 | `typed` |
+
+- 输入框有内容或有人在打字时返回 `via: "queued"`：消息存进 `<项目>/.crew/outbox/<成员>/`，后台进程每 2 秒检查一次，空出来就按顺序发出，对方窗格的状态栏会提示有消息在等。30 分钟仍发不出就移到 `outbox/<成员>/expired/`。不需要重发。
+- `via: "left_in_box"`：粘贴的瞬间用户刚好开始打字，消息留在输入框里没按回车，由用户决定发不发。
+- agy 的通道要先登记：agy 成员每次运行任何 crew 命令时，脚本自动记下它的会话地址（`~/.cache/crew/agy/`，仅本人可读）。新开时的说明消息会让它先运行一次 `whoami`；恢复后地址会变，`restore` 会提示它重新登记。登记前或地址失效时自动改用打字方式。
+- `doctor` 会检查 `codex queue` 和 `agy agentapi` 在本机能否使用。
 
 ### 点对点：组员之间直接联系，也可以跨组
 
@@ -242,14 +258,14 @@ python3 $CREW quota                         # 三家剩余额度（10 分钟缓�
 
 ## board / task：任务看板
 
-用户问「大家在忙什么」「还有哪些事在排」时，运行：
+用户问「大家在忙什么」「还有哪些事在排」「走到哪一步了」「额度还剩多少」时，运行：
 
 ```bash
 python3 $CREW board --text          # 每个成员：忙/空闲/离线、现在做什么、排期
 python3 $CREW board --text --dir ~/Documents/other-project   # 看别的组
 ```
 
-「忙/空闲」是从窗格读出来的（是否在生成）；「现在 / 排期」来自各成员自己登记的任务，存在 `<项目>/.crew/tasks.json`。
+「忙/空闲」是从窗格读出来的（是否在生成）；「现在 / 排期」来自各成员自己登记的任务，存在 `<项目>/.crew/tasks.json`。每行还带该成员所用 CLI 的最紧剩余额度（低于 20% 标 ⚠），末尾列出三家全部额度和重置时间（本机时区，读法同 `quota`）；不想读额度加 `--no-quota`。
 
 ```bash
 python3 $CREW task --now "重写解析器" --next "补单元测试" --next "性能对比"
@@ -260,6 +276,17 @@ python3 $CREW task --for review --now "…"    # 只有 main 能替别人登记
 
 - 成员接到新任务、做完一件、排期变了，都用 `task` 更新自己的一行；main 派任务时可以先替对方登记。
 - 给用户看时用 `--text` 的输出原样转述；登记时间很久没更新的，先 `read` 对方窗格核实再说。
+
+工作流程链条（全组从现在到交付的关键步骤）由 main 维护，`board` 显示在成员列表之后：
+
+```bash
+python3 $CREW flow --clear --add "需求定稿@design" --add "实现@coder" --add "评审@review"
+python3 $CREW flow --status 2 doing          # todo / doing / done / blocked
+python3 $CREW flow --remove 3
+python3 $CREW flow                           # 只看流程（JSON）
+```
+
+- 每步一个短语，`@负责人` 可省，也可以写「用户」或「a/b」。`board` 把未完成的步骤连成一行箭头链（`▶进行中、▶并行 → 下一步 → …`，⏸ 表示卡住），已完成的收在下面一行。组员只能读，改动由 main 做；关键路径变了（新增修正、某步卡住、要用户决定）就更新，让用户一眼看出卡在哪一步、下一个轮到谁。
 
 - **断线停住的检测**：`python3 $CREW watch` 找出「刚报过连接错误（API Error、ECONNRESET、No response 等）、停在提示符上」的成员；加 `--nudge` 会给有登记任务的成员发一句「从断点继续」。main 可以用 `/loop 20m` 或定时唤醒定期跑 `watch --nudge`，只有发现停住时才需要处理。
 

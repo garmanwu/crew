@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0 — 2026-11-27
+
+- Messages no longer land in the middle of what someone is typing. `send`, panel rounds and `watch --nudge` pick a route per receiver: Codex through `codex queue` (its own message queue), agy through `agy agentapi send-message`, Claude from Claude through the SendMessage tool (`send` returns `use: SendMessage`). None of these touch the input box. The result's `via` field names the route.
+- When a message has to be typed, crew first checks the receiver's input box (Claude Code, Codex and agy layouts, placeholders ignored) and the time of the last key pressed in that pane (tmux `client_activity`). If the box has text or someone typed in the last 8 seconds, the message waits in `.crew/outbox/<member>/` and a background `flush` delivers it in order once the box is clear (up to 30 minutes, then `expired/`). The tmux status bar of that pane says a message is waiting.
+- agy members record their language-server address on every crew.py run (`~/.cache/crew/agy/`, mode 600); the spawn intro asks them to run `whoami` once, and `restore` asks again when the address is stale.
+- `send --typed`: Claude to Claude, type the message (guarded) instead of asking for SendMessage.
+- `doctor` checks that `codex queue` and `agy agentapi` are available.
+- `flow --add/--status/--remove/--clear`: main keeps the group's workflow chain (key steps from now to delivery, each with an owner) in `.crew/flow.json`; `board` shows the open steps as one arrow chain (▶ under way, ⏸ blocked) with finished steps on a line below.
+
 ## 1.3.3 — 2026-11-26
 
 - The crew / sub-agent / direct-call comparison is now a Markdown table with ★ ratings and short notes.

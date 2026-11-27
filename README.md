@@ -107,7 +107,7 @@ mkdir -p ~/.gemini/config/skills && ln -s ~/.claude/skills/crew ~/.gemini/config
 | 操作 | 结果 |
 |---|---|
 | 新开 agent | 在 main 旁边分屏，进入同一目录，新建 tmux 会话 `<目录名>-<名称>`，带模型和 effort 启动，并告诉它组里有谁、怎么发消息 |
-| 发消息 | 文本送进对方的输入框并提交，自动带 `[from 发送者]` 前缀 |
+| 发消息 | 自动带 `[from 发送者]` 前缀。Codex 用 `codex queue`、agy 用 `agentapi` 直接送进对话，Claude 之间用 SendMessage，都不碰输入框；只能打字时，等对方输入框空了、键盘停了再发，不会插进用户打了一半的内容 |
 | 读进展 | 读取对方窗格当前的屏幕内容 |
 | 保存 | 重新读取每个窗格当前的会话 ID，写入 `.crew.json`，生成 `<目录名>-crew.command` |
 | 恢复 | 新开一个 iTerm2 窗口，按原来的分屏顺序恢复每个 agent 的对话；tmux 会话还活着时直接接回去，不重启 |
@@ -126,7 +126,8 @@ python3 $CREW spawn --name design --agent codex --model gpt-6.2-astra --effort h
 python3 $CREW send --to design "请看一下 SPEC.md 第 3 节"
 python3 $CREW read --name design --lines 80
 python3 $CREW status
-python3 $CREW board --text      # 全组：忙/空闲/离线、现在做什么、排期；codex 模型被换会标出
+python3 $CREW board --text      # 全组：忙/空闲/离线、现在做什么、排期、工作流程链条、剩余额度；codex 模型被换会标出
+python3 $CREW flow --add "实现@coder" --status 1 doing   # main 维护工作流程链条，显示在 board 里
 python3 $CREW task --now "…" --next "…"   # 登记自己的任务
 python3 $CREW watch --nudge     # 找出断线停住的成员并叫醒
 python3 $CREW save

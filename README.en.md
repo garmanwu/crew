@@ -119,7 +119,7 @@ A 50-point Elo gap is roughly a 57% win rate, which is why options inside that m
 | Action | Result |
 |---|---|
 | Start an agent | Splits a pane next to main, enters the same folder, creates tmux session `<folder>-<name>`, starts the CLI with the model and effort, and tells it who is in the group and how to send messages |
-| Send a message | Types the text into the other agent's input and submits it, prefixed with `[from <sender>]` |
+| Send a message | Prefixed with `[from <sender>]`. Codex gets it through `codex queue`, agy through `agentapi`, Claude from Claude through SendMessage, none of which touch the input box. When the text has to be typed, crew waits until the box is empty and nobody is typing, so it never lands in the middle of what you are typing |
 | Read progress | Captures the other pane's current screen |
 | Save | Re-reads every pane's current session id, writes `.crew.json` and `<folder>-crew.command` |
 | Restore | Opens a new iTerm2 window and resumes every agent's conversation in the original layout; live tmux sessions are re-attached, not restarted |
@@ -139,7 +139,8 @@ python3 $CREW spawn --name design --agent codex --model gpt-6.2-astra --effort h
 python3 $CREW send --to design "Please review section 3 of SPEC.md"
 python3 $CREW read --name design --lines 80
 python3 $CREW status
-python3 $CREW board --text      # whole group: busy/idle/offline, current and scheduled tasks; flags a swapped Codex model
+python3 $CREW board --text      # whole group: busy/idle/offline, current and scheduled tasks, workflow chain, remaining quota; flags a swapped Codex model
+python3 $CREW flow --add "build@coder" --status 1 doing  # main keeps the workflow chain shown on board
 python3 $CREW task --now "…" --next "…"   # record your own tasks
 python3 $CREW watch --nudge     # find members stopped after a connection error and wake them
 python3 $CREW save
