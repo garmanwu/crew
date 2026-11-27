@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1 — 2026-11-27
+
+- Claude to Claude: `send` delivers itself again (typed only when the receiver's input box is empty and the keyboard idle, otherwise queued) instead of returning `use: SendMessage` for the sender to act on. Sessions that had not reloaded the skill could take the `ok: true` result as sent and lose the message. `send --typed` is still accepted and does nothing extra.
+
 ## 1.4.0 — 2026-11-27
 
 - Messages no longer land in the middle of what someone is typing. `send`, panel rounds and `watch --nudge` pick a route per receiver: Codex through `codex queue` (its own message queue), agy through `agy agentapi send-message`, Claude from Claude through the SendMessage tool (`send` returns `use: SendMessage`). None of these touch the input box. The result's `via` field names the route.

@@ -1,7 +1,7 @@
 ---
 name: crew
 description: Split the current iTerm2 pane and start another coding agent (Codex, Antigravity agy or Claude Code, any model and effort) in its own tmux session; members message each other, run a three-round anonymous review that maps disagreements instead of voting, read each CLI's remaining quota and recommend a model per task from quota, a leaderboard snapshot and personal preferences, and save and restore the whole group with its conversations. macOS + iTerm2. Use for /crew ($crew in Codex) or requests like open a codex agent, message design, review this anonymously, which model for frontend, show quota, save or restore the crew. 在 iTerm2 分屏新开 tmux 里的 agent（codex / agy / claude，可指定模型和 effort），组员互发消息，三轮匿名评议，读取三家额度并按任务推荐模型，保存与一键恢复整组。用户运行 /crew，或说新开一个 agent、给 design 发消息、让大家评议一下、做前端用哪个模型、看看额度、保存或恢复 agent 组时使用。
-version: 1.4.0
+version: 1.4.1
 argument-hint: "[spawn [name] [agent] [model] [effort] | send <name> <text> | read <name> | advise <task> | quota | rankings | panel <topic> | board | task | status | save | restore | doctor]"
 allowed-tools:
   - Bash(python3 ~/.claude/skills/crew/scripts/crew.py *)
@@ -126,8 +126,7 @@ python3 $CREW read --name design --lines 80
 |---|---|---|
 | Codex | `codex queue` 放进对方当前对话的队列，不碰输入框；空闲时立即处理，忙时这一轮做完再处理 | `codex-queue` |
 | agy | `agy agentapi send-message` 直接送进对话，不碰输入框；agy 窗格不显示收到的原文，crew 在该窗格的 tmux 状态栏提示一行 | `agentapi` |
-| Claude，发件方也是 Claude | 脚本不发送，返回 `delivered: false, use: "SendMessage", to: <会话名>, message: <全文>`。**收到这个结果就用 SendMessage 工具把 `message` 原样发给 `to`**；工具不可用或被拒时，用 `send --typed` 重发 | — |
-| 其余情况（Claude 收件方遇到非 Claude 发件方、上面的方式不可用） | 只在对方输入框为空、且 8 秒内没人在该窗格按键时才打字提交 | `typed` |
+| Claude，以及上面两种方式不可用时 | 只在对方输入框为空、且 8 秒内没人在该窗格按键时才打字提交 | `typed` |
 
 - 输入框有内容或有人在打字时返回 `via: "queued"`：消息存进 `<项目>/.crew/outbox/<成员>/`，后台进程每 2 秒检查一次，空出来就按顺序发出，对方窗格的状态栏会提示有消息在等。30 分钟仍发不出就移到 `outbox/<成员>/expired/`。不需要重发。
 - `via: "left_in_box"`：粘贴的瞬间用户刚好开始打字，消息留在输入框里没按回车，由用户决定发不发。

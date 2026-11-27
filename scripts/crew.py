@@ -166,8 +166,7 @@ def wait_ready(session, timeout=60):
 #   agy    `agy agentapi send-message`: needs the member's language-server address and
 #          token, which only its own shell commands inherit, so crew.py records them
 #          whenever an agy member runs it (register_agy)
-#   claude another Claude session sends with its SendMessage tool (cmd_send says so);
-#          anything else is typed, guarded:
+#   claude and anything the routes above cannot reach is typed, guarded:
 #   typed  only when the input box is empty and nobody has pressed a key in the pane
 #          for IDLE_SECS; otherwise the message waits in <project>/.crew/outbox/ and a
 #          detached `crew.py flush` delivers it once the box is clear.
@@ -1067,8 +1066,6 @@ def intro_text(state, m, main_reachable):
         if not main_reachable:
             t += "main 目前不在 tmux 中，收不到消息，它会主动读取你的窗格。"
     t += "以 [from 名称] 开头的输入来自组员。"
-    if m["agent"] == "claude":
-        t += "对方是 Claude 时 send 会返回 use: SendMessage，照提示用 SendMessage 工具发出。"
     if m["agent"] == "agy":
         # registers this agy's language server so messages can skip the input box
         t += ("现在先运行一次：python3 %s whoami，再只回复：%s 就绪。"
@@ -1226,40 +1223,11 @@ def cmd_send(args):
         me["session_id"] = tid
         store(d, state)
     text = "[from %s]%s %s" % (who, reply, args.message)
-    if m["agent"] == "claude" and agent == "claude" and os.environ.get("CLAUDE_CODE_SESSION_ID") \
-            and not args.typed:
-        peer = claude_peer(m)
-        if peer:
-            # Claude to Claude: the SendMessage tool delivers without touching the
-            # receiver's input box. Only the calling Claude can use it.
-            done(sent_to=m["name"], sender=who, delivered=False, use="SendMessage",
-                 to=peer, message=text,
-                 note="还没有发出。请用 SendMessage 工具把 message 原样发给 to（%s）；"
-                      "工具不可用或被拒时，改用 send --typed 重发。" % peer)
-            return
     via = deliver(d, state, m, text)
     done(sent_to=m["name"], sender=who, via=via,
          note={"queued": "%s 的输入框里有内容或正在打字，消息已排队，空出来后自动发送"
                          "（最多等 %d 分钟）。" % (m["name"], WAIT_MAX // 60),
                "left_in_box": "对方正好在打字：消息已放进输入框但没按回车，由对方确认发送。"}.get(via))
-
-
-def claude_peer(m):
-    """The name other Claude sessions use to message this member (SendMessage /
-    ListAgents), read from the session file of the Claude process in its pane."""
-    rc, out = tmux("list-panes", "-t", "=" + m["session"], "-F", "#{pane_pid}")
-    if rc != 0 or not out:
-        return None
-    pid = out.splitlines()[0]
-    for p in [pid] + run("pgrep", "-P", pid)[1].split():
-        try:
-            with open(os.path.expanduser("~/.claude/sessions/%s.json" % p)) as f:
-                s = json.load(f)
-            if s.get("messagingSocketPath") and s.get("name"):
-                return s["name"]
-        except (OSError, ValueError):
-            continue
-    return None
 
 
 TASKS = os.path.join(".crew", "tasks.json")
@@ -1897,8 +1865,7 @@ def main():
     s = sub.add_parser("send", help="message another member")
     s.add_argument("--to", required=True)
     s.add_argument("message")
-    s.add_argument("--typed", action="store_true",
-                   help="Claude to Claude: type it (guarded) instead of asking for SendMessage")
+    s.add_argument("--typed", action="store_true", help=argparse.SUPPRESS)  # 1.4.0, now a no-op
     s.add_argument("--dir", default=os.getcwd())
     s.set_defaults(fn=cmd_send)
 
